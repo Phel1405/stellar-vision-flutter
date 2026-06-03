@@ -27,6 +27,7 @@ void main() async {
   runApp(ChangeNotifierProvider(
       create: (context) => LoginState(),
       child: const MaterialApp(
+        debugShowCheckedModeBanner: false,
         home: LoginWidget()
       ),
   ));
@@ -40,24 +41,54 @@ class LoginWidget extends StatefulWidget {
 
 class _LoginWidgetState extends State<LoginWidget> {
 
+  final _formKey = GlobalKey<FormState>();
   final TextEditingController _tecEmail = TextEditingController();
   final TextEditingController _tecPass = TextEditingController();
+
   bool _isLoading = false;
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _tecEmail.dispose();
+    _tecPass.dispose();
+    super.dispose();
+  }
 
   Future<bool> signIn(String email, String pass) async {
     try{
       setState(() {
         _isLoading = true;
       });
-      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: pass);
+      await FirebaseAuth.instance.signInWithEmailAndPassword(email: email, password: pass);
       return true;
     } on FirebaseAuthException catch (e) {
-      if(e.code == 'user-not-found'){
-        print('No user found');
-      }else if (e.code == 'wrong-password'){
-        print('Wrong password');
+      String errorMessage = "Ocurrió un error al iniciar sesión.";
+
+      if (e.code == 'user-not-found' || e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        errorMessage = 'Correo o contraseña incorrectos.';
+      } else if (e.code == 'invalid-email') {
+        errorMessage = 'El formato del correo no es válido.';
+      } else if (e.code == 'network-request-failed') {
+        errorMessage = 'Error de red. Revisa tu conexión.';
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
       }
       return false;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -66,45 +97,118 @@ class _LoginWidgetState extends State<LoginWidget> {
     var state = context.watch<LoginState>();
 
     return Scaffold(
+      backgroundColor: Colors.grey[50],
       body: Padding(
-        padding: const EdgeInsets.all(12.0),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text("Email: "),
-            TextField(
-                controller: _tecEmail
-            ),
-            Text("Password: "),
-            TextField(
-              controller: _tecPass,
-            ),
-            ElevatedButton(
-                onPressed: () async {
-                  final email = _tecEmail.text.trim();
-                  final password = _tecPass.text.trim();
+        padding: const EdgeInsets.symmetric(horizontal: 24.0),
+        child: Form(
+          key: _formKey,
+          child:  Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              const Icon(
+                Icons.lock_person_rounded,
+                size: 80,
+                color: Colors.blueAccent,
+              ),
+              const SizedBox(height: 16),
 
-                  bool success = await signIn(email, password);
+              const Text(
+                "Ingresa tus credenciales para continuar",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+              const SizedBox(height: 32),
 
-                  if(success & mounted){
-                    state.email = email;
-                    state.password = password;
-
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (context) => ChangeNotifierProvider(
-                          create: (context) => HomeState(),
-                          child: const HomeWidget(),
-                        )
-                      ),
-                    );
+              TextFormField(
+                controller: _tecEmail,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: "Correo Electrónico",
+                  prefixIcon: const Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Por favor ingresa tu correo.';
                   }
+                  return null;
                 },
-              child: const Text("Iniciar sesion"),
-            ),
-          ],
-        ),
+              ),
+              const SizedBox(height: 16),
+
+              TextFormField(
+                controller: _tecPass,
+                obscureText: _obscurePassword,
+                decoration: InputDecoration(
+                  labelText: "Contraseña",
+                  prefixIcon: const Icon(Icons.lock_outlined),
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                    ),
+                    onPressed: () {
+                      setState(() {
+                        _obscurePassword = !_obscurePassword;
+                      });
+                    },
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Por favor ingresa tu contraseña.';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 24),
+
+              _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : SizedBox(
+                width: double.infinity,
+                child:ElevatedButton(style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  elevation: 2,
+                ),
+                    onPressed: () async {
+                      if(!_formKey.currentState!.validate()) return;
+
+                      final email = _tecEmail.text.trim();
+                      final password = _tecPass.text.trim();
+
+                      bool success = await signIn(email, password);
+
+                      if(success && mounted){
+                        state.email = email;
+                        state.password = password;
+
+                        Navigator.pushReplacement(
+                          context,
+                          MaterialPageRoute(
+                              builder: (context) => ChangeNotifierProvider(
+                                create: (context) => HomeState(),
+                                child: const HomeWidget(),)
+                          ),
+                        );
+                      }
+                    }, child: const Text("Iniciar sesion", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),)
+                ),
+              )
+            ],
+          ),
+        )
       ),
     );
   }
